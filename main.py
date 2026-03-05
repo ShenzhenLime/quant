@@ -191,39 +191,39 @@ def main():
     end_date = datetime.now().strftime("%Y%m%d")
     ## 对于个股数据，按日增量获取。指数、交易日数据全量获取
 
-    # # 1. 获取成分股
-    # print("\n获取指数成分股...")
-    # get_ins(index_code)
+    # 1. 获取成分股
+    print("\n获取指数成分股...")
+    get_ins(index_code)
     
-    ## 2. 获取交易日
-    # print("\n获取交易日历...")
-    # get_trade(start_date, end_date)
+    # 2. 获取交易日
+    print("\n获取交易日历...")
+    get_trade(start_date, end_date)
     
-    ## 3. 获取全量股票日线（Tushare更推荐按日循环，所以此处不对股票进行筛选）
+    # 3. 获取全量股票日线（Tushare更推荐按日循环，所以此处不对股票进行筛选）
     # 不用指定日期，会在代码内部自动填补最新数据
-    # print("\n获取股票日线数据...")
-    # get_stock_data_by_date(f'{MARKET_PATH}/stock_bar.csv', use_db=use_db)
+    print("\n获取股票日线数据...")
+    get_stock_data_by_date(f'{MARKET_PATH}/stock_bar.csv', use_db=use_db)
     
-    ## 4. 获取指数日线
-    # print("\n获取指数日线数据...")
-    # get_index_data(index_code)
+    # 4. 获取指数日线
+    print("\n获取指数日线数据...")
+    get_index_data(index_code)
     
     ## 5. 获取补充数据并计算因子
-    # print("\n获取补充数据（如PB、MV）...")
-    # get_daily_basic(f'{FINANCIALS_PATH}/daily_basic.csv', use_db=use_db)
+    print("\n获取补充数据（如PB、MV）...")
+    get_daily_basic(f'{FINANCIALS_PATH}/daily_basic.csv', use_db=use_db)
     
     # 6. 定价因子计算
-    # print("\n计算定价因子（SMB、HML、UMD）...")
-    # compute_pricing_factors(
-    #     stock_path=f'{MARKET_PATH}/stock_bar.csv',
-    #     financial_path=f'{FINANCIALS_PATH}/daily_basic.csv',
-    #     out_dir=DERIVED_FACTORS_PATH,
-    #     use_db=use_db
-    # )
+    print("\n计算定价因子（SMB、HML、UMD）...")
+    compute_pricing_factors(
+        stock_path=f'{MARKET_PATH}/stock_bar.csv',
+        financial_path=f'{FINANCIALS_PATH}/daily_basic.csv',
+        out_dir=DERIVED_FACTORS_PATH,
+        use_db=use_db
+    )
     
     # 7. 计算周末效应因子
-    # print("\n计算周末效应因子...")
-    # compute_week_effect()
+    print("\n计算周末效应因子...")
+    compute_week_effect()
     
     # # 8. 因子评测（月度调仓，使用DuckDB）
     print("\n因子评测...")
@@ -237,10 +237,6 @@ def main():
 if __name__ == '__main__':
     main()
     
-    # query = f"SELECT DISTINCT trade_date FROM {'daily_basic'}"
-    # existing_data = db_utils.read_sql(query)
-    # already_downloaded = set(existing_data['trade_date'].astype(str).unique())
-    # print(len(already_downloaded))  
 
 
 

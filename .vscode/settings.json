@@ -1,5 +1,7 @@
 {
     "python-envs.defaultEnvManager": "ms-python.python:system",
     "python-envs.defaultPackageManager": "ms-python.python:pip",
-    "python-envs.pythonProjects": []
+    "python-envs.pythonProjects": [],
+    "latex-workshop.view.pdf.internal.synctex.keybinding": "double-click",
+    "latex-workshop.synctex.afterBuild.enabled": true
 }

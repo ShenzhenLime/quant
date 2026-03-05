@@ -13,3 +13,20 @@ env/
 # IDE
 .idea/
 .vscode/
+
+# LaTeX 源文件及编译产物（保留 PDF）
+*.tex
+*.aux
+*.log
+*.nav
+*.snm
+*.toc
+*.vrb
+*.out
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.bbl
+*.blg
+# 明确允许 PDF 上传
+!*.pdf

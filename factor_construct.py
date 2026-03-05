@@ -308,21 +308,20 @@ def compute_pricing_factors(stock_path, financial_path, out_dir, use_db=True):
     # 0. 检查是否已有数据（增量更新逻辑）
     out_path = os.path.join(out_dir, 'pricing_factors.csv')
     existing_dates = set()
-    existing_data = None
+    existing_data = None  # 已计算的 pricing_factors 数据（含 SMB/HML/UMD）
     
     try:
         if use_db:
-            existing_data = db_utils.query_daily_basic()
+            existing_data = db_utils.read_sql("SELECT * FROM pricing_factors")
         else:
             existing_data = pd.read_csv(out_path)
+        existing_dates = set(existing_data['trade_date'].astype(int).unique())
+        print(f'发现已有数据，包含 {len(existing_dates)} 个交易日')
+        print(f'  最早日期: {min(existing_dates)}')
+        print(f'  最晚日期: {max(existing_dates)}')
     except Exception as e:
-        print(f'读取已有数据失败: {e}，将重新计算全部数据')
+        print(f'未找到已有pricing_factors数据（{e}），将重新计算全部数据')
         existing_dates = set()
-
-    existing_dates = set(existing_data['trade_date'].astype(int).unique())
-    print(f'发现已有数据，包含 {len(existing_dates)} 个交易日')
-    print(f'  最早日期: {min(existing_dates)}')
-    print(f'  最晚日期: {max(existing_dates)}')
     
     # 1. 读取股票数据
     # print('读取股票数据...')
