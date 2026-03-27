@@ -1,0 +1,3 @@
+[submodule "factor_mining"]
+	path = factor_mining
+	url = https://github.com/ShenzhenLime/quant_factors.git
