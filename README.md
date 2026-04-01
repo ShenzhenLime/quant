@@ -1,5 +1,5 @@
 # quant_infra — 量化基础框架
-
+**使用示例视频**：【耗时一个月，我搭建了最适合新手的完整量化框架。】 https://www.bilibili.com/video/BV1skXeBTEq3/?share_source=copy_web&vd_source=268eee2a1463962256f74e1052f0bbc1
 ---
 ## 📖 写在前面
 > **熙熙攘攘，皆为利往，安于传道，能有几何？**

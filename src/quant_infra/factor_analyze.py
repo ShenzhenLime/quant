@@ -718,7 +718,7 @@ def ic_half_life(factor_table, max_lag=200, other_name=None):
     ## 这里的 tqdm 是在“收快递”
     ic_list = [{'lag': lag, 'ic': ic} for lag, ic in tqdm(raw, total=max_lag, desc='计算 IC 衰减')]
     # 然后排序
-    ic_decay_df = pd.DataFrame(ic_list).sort_values('lag')
+    ic_decay_df = pd.DataFrame(ic_list).sort_values('lag').reset_index(drop=True)
 
     # 4. 半衰期：首次 |IC| ≤ |IC(lag=1)| / 2 的滞后期
     ic_1 = ic_decay_df.loc[0, 'ic']
