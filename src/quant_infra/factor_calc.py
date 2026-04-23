@@ -4,7 +4,8 @@ import os
 from joblib import Parallel, delayed
 from tqdm import tqdm
 from quant_infra import db_utils, get_data
-from datetime import datetime, timedelta
+from quant_infra.const import RESID_REG_WINDOW, SPEC_VOL_WINDOW
+from datetime import timedelta
 
 #按日期计算定价因子   
 # 定义单日计算函数
@@ -128,127 +129,98 @@ def compute_pricing_factors():
     db_utils.write_to_db(result_df, 'pricing_factors', save_mode='append')
     return 
 
-def calc_single_beta(ts_code, stock_df):
-    """计算单只股票的beta系数 - 用全历史数据做回归（日收益率y = 截距 + MKT/SMB/HML/UMD）"""
+def calc_single_resid_rolling(code, stock_df, reg_window=RESID_REG_WINDOW):
+    """按股票滚动回归，计算每日残差。
+
+    对于每个交易日 t，使用最近 reg_window 个交易日（含 t）的数据回归四因子模型，
+    仅保留 t 当天对应的残差。这样 beta 会随时间滚动更新，但无需单独落库。
+    """
     try:
-        if len(stock_df) < 220:  # 至少需要220个交易日
-            return
-                 
-        # 用单只股票的所有历史数据做回归
-        X_full = np.column_stack([np.ones(len(stock_df)), stock_df[['MKT', 'SMB', 'HML', 'UMD']].to_numpy()])
-        y_full = stock_df['pct_chg'].to_numpy()
+        stock_df = stock_df.sort_values('trade_date').reset_index(drop=True)
+        if len(stock_df) < reg_window:
+            return pd.DataFrame()
 
-        beta = np.linalg.lstsq(X_full, y_full, rcond=None)[0]
-        # 保存单套beta信息
-        beta_info = {
-            'ts_code': ts_code,
-            'intercept': float(beta[0]),
-            'MKT_beta': float(beta[1]),
-            'SMB_beta': float(beta[2]),
-            'HML_beta': float(beta[3]),
-            'UMD_beta': float(beta[4]),
-            'update_date': datetime.now().strftime('%Y%m%d')
-        }
+        X = stock_df[['MKT', 'SMB', 'HML', 'UMD']].to_numpy(dtype=float)
+        y = stock_df['pct_chg'].to_numpy(dtype=float)
+        resid = np.full(len(stock_df), np.nan, dtype=float)
 
-        return beta_info
-        
-    except Exception as e:
-        # 保持并行任务不中断，但输出最小必要信息便于排查
-        print(f"calc_single_beta 失败: ts_code={ts_code}, error={type(e).__name__}: {e}")
-        return None
+        for end_idx in range(reg_window - 1, len(stock_df)):
+            start_idx = end_idx - reg_window + 1
+            X_win = X[start_idx:end_idx + 1]
+            y_win = y[start_idx:end_idx + 1]
+            X_reg = np.column_stack([np.ones(len(X_win)), X_win])
+            beta_vec = np.linalg.lstsq(X_reg, y_win, rcond=None)[0]
+            resid[end_idx] = y_win[-1] - (X_reg[-1] @ beta_vec)
 
-def calc_single_resid(code, stock_df):
-    try:
-        X_full = np.column_stack([np.ones(len(stock_df)), stock_df[['MKT', 'SMB', 'HML', 'UMD']].to_numpy()])
-        y_full = stock_df['pct_chg'].to_numpy()
-
-        # 单只股票在该分组内应只有一套 beta，取首行并转为 1D 向量
-        # to_numpy一行时就转为向量，如果是多行就保持二维
-        beta_vec = stock_df[['intercept', 'MKT_beta', 'SMB_beta', 'HML_beta', 'UMD_beta']].iloc[0].to_numpy(dtype=float)
-        y_hat = X_full @ beta_vec
-        stock_df['resid'] = y_full - y_hat
-        return stock_df[['ts_code', 'trade_date', 'resid']]
+        result = stock_df[['ts_code', 'trade_date']].copy()
+        result['resid'] = resid
+        return result.dropna(subset=['resid'])
     except Exception as e:
         # 返回空结果避免中断整体流程，同时保留错误上下文
-        print(f"calc_single_resid 失败: ts_code={code}, error={type(e).__name__}: {e}")
+        print(f"calc_single_resid_rolling 失败: ts_code={code}, error={type(e).__name__}: {e}")
         return pd.DataFrame()
 
 def calc_resid():
     """
-    需要能够判断是否需要获取beta，没有就计算
-    计算resid后，直接写入数据库
-    支持append新数据
+    使用滚动回归计算日度残差，并写入 stock_resids。
+
+    对于每个交易日 t：
+    1. 取最近 RESID_REG_WINDOW 个交易日（含 t）的股票收益与四因子收益；
+    2. 现场回归得到当期 beta；
+    3. 仅保留 t 当天残差。
     """
     compute_pricing_factors()
     dates_to_download = get_data.get_dates_todo('stock_resids')
     if not dates_to_download:
         print("残差数据已是最新")
         return
-    # ========== 检查是否已有beta系数 ==========
-    existing_betas = False
-    try:
-        count = db_utils.read_sql("SELECT Count(*) FROM stock_betas").squeeze()
-        if count > 5000:
-            existing_betas = True
-    except Exception:
-        print('未找到已有beta数据')
-        existing_betas = False
-    
-    # 把定价因子和股票日线数据合并在一起，减少后续计算时的重复读取和合并 
+
+    reg_window = RESID_REG_WINDOW
+    # 取足够长的自然日缓冲，覆盖滚动回归窗口。
+    reg_buffer_days = max(60, int(np.ceil(reg_window * 1.6)))
+    start_dt = pd.to_datetime(str(dates_to_download[0]), format='%Y%m%d') - timedelta(days=reg_buffer_days)
+    start_str = start_dt.strftime('%Y%m%d')
+
+    # 把定价因子和股票日线数据合并在一起，减少后续计算时的重复读取和合并
     query = f"""
     SELECT b.ts_code, b.trade_date, b.pct_chg, p.MKT, p.SMB, p.HML, p.UMD
     FROM stock_bar b
     LEFT JOIN (SELECT trade_date, MKT, SMB, HML, UMD FROM pricing_factors) p
     ON b.trade_date = p.trade_date
-    WHERE b.trade_date >= '{dates_to_download[0]}' AND b.trade_date <= '{dates_to_download[-1]}'
-    ORDER BY b.trade_date, b.ts_code
+    WHERE b.trade_date >= '{start_str}' AND b.trade_date <= '{dates_to_download[-1]}'
+    ORDER BY b.ts_code, b.trade_date
     """
     df = db_utils.read_sql(query)
-    
-    # **过滤掉定价因子为NaN的行**
+
+    # 过滤掉收益率或定价因子缺失的行
     df = df.dropna(subset=['pct_chg', 'MKT', 'SMB', 'HML', 'UMD'])
-    
-    ## 如果本地没有beta，就先计算出beta并保存到数据库，后续计算因子时就可以直接读取beta了
-    if not existing_betas:
-        # 计算beta
-        # 按股票代码分组
-        groups = df.groupby('ts_code')
-        # 在 Parallel 中直接使用迭代器
-        beta_results = Parallel(n_jobs=-1)(
-            delayed(calc_single_beta)(code, stock_df) 
-            for code, stock_df in groups
-        )
-        beta_results = [x for x in beta_results if x is not None]
-        if not beta_results:
-            print('未生成可用beta：样本可能不足（当前阈值>=220）或数据异常')
-            return
-        # 保存beta
-        beta_df = pd.DataFrame(beta_results)
-        db_utils.write_to_db(beta_df, 'stock_betas', save_mode='replace')
-        
-    
-    # 先合并beta数据至日频，之后计算每日的残差
-    beta_df = db_utils.read_sql("SELECT ts_code, intercept, MKT_beta, SMB_beta, HML_beta, UMD_beta FROM stock_betas")
-    beta_df.dropna(inplace=True)
-    all_df = df.merge(beta_df, on='ts_code', how='left')
-    groups = all_df.groupby('ts_code')
+
+    groups = df.groupby('ts_code')
 
     resid_results = Parallel(n_jobs=-1)(
-        delayed(calc_single_resid)(code, group_df) 
-    for code, group_df in tqdm(groups, desc='计算残差')
+        delayed(calc_single_resid_rolling)(code, group_df, reg_window)
+        for code, group_df in tqdm(groups, desc='滚动计算残差')
     )
     resid_results = [x for x in resid_results if x is not None and not x.empty]
     if not resid_results:
-        print('未生成可用残差：请检查beta表或有效样本区间')
+        print(f'未生成可用残差：有效样本可能不足 {reg_window} 个交易日')
         return
-    # 合并结果
-    all_resid = pd.concat(resid_results)
-    db_utils.write_to_db(all_resid, 'stock_resids', save_mode='append')
+
+    all_resid = pd.concat(resid_results, ignore_index=True)
+    all_resid['trade_date'] = all_resid['trade_date'].astype(str)
+    result = all_resid[all_resid['trade_date'].isin(dates_to_download)].copy()
+
+    if result.empty:
+        print(f"没有可保存的残差数据（回归历史可能不足 {reg_window} 个交易日）")
+        return
+
+    db_utils.write_to_db(result[['ts_code', 'trade_date', 'resid']], 'stock_resids', save_mode='append')
+    print(f"滚动残差计算完成，共 {len(result)} 条记录")
 
 def calc_spec_vol():
     """
     基于 stock_resids 计算特质波动率因子（日频）
-    特质波动率 = 近20个交易日残差的波动率 = std(residuals)
+    特质波动率 = 近 SPEC_VOL_WINDOW 个交易日残差的波动率 = std(residuals)
     结果存入 spec_vol 表，列为 (ts_code, trade_date, factor)
     """
     dates_to_download = get_data.get_dates_todo('spec_vol')
@@ -256,8 +228,10 @@ def calc_spec_vol():
         print("特质波动率因子数据已是最新")
         return
 
-    # 往前多取 45 自然日作为缓冲，确保能填满 20 交易日滚动窗口
-    start_dt = pd.to_datetime(str(dates_to_download[0]), format='%Y%m%d') - timedelta(days=45)
+    vol_window = SPEC_VOL_WINDOW
+    # 往前多取足够长的自然日作为缓冲，确保能填满残差滚动窗口
+    vol_buffer_days = max(30, int(np.ceil(vol_window * 3)))
+    start_dt = pd.to_datetime(str(dates_to_download[0]), format='%Y%m%d') - timedelta(days=vol_buffer_days)
     start_str = start_dt.strftime('%Y%m%d')
 
     query = f"""
@@ -275,16 +249,16 @@ def calc_spec_vol():
     df['trade_date'] = df['trade_date'].astype(str)
     df = df.sort_values(['ts_code', 'trade_date'])
 
-    # 按股票分组，计算滚动 20 日波动率
+    # 按股票分组，计算滚动波动率
     df['factor'] = df.groupby('ts_code')['resid'].transform(
-        lambda x: x.rolling(window=20, min_periods=20).std()
+        lambda x: x.rolling(window=vol_window, min_periods=vol_window).std()
     )
 
     result = df[df['trade_date'].isin(dates_to_download)][['ts_code', 'trade_date', 'factor']]
     result = result.dropna(subset=['factor'])
 
     if result.empty:
-        print("没有可保存的特质波动率数据（残差历史可能不足 20 个交易日）")
+        print(f"没有可保存的特质波动率数据（残差历史可能不足 {vol_window} 个交易日）")
         return
 
     db_utils.write_to_db(result, 'spec_vol', save_mode='append')
@@ -293,4 +267,3 @@ def winsorize(series, n=3):
     """按 n 倍标准差缩尾，将超过范围的值替换为边界值"""
     mean, std = series.mean(), series.std()
     return series.clip(mean - n * std, mean + n * std)
-

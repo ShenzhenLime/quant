@@ -12,10 +12,12 @@ test.csv
 __pycache__/
 *.py[cod]
 *$py.class
+src/quant_infra.egg-info/
 
 # 虚拟环境
 venv/
 env/
+.env
 
 # IDE
 .idea/

@@ -8,17 +8,19 @@ from tqdm import tqdm
 
 from joblib import Parallel, delayed
 import os
+from dotenv import load_dotenv
 from quant_infra import db_utils
 from quant_infra.const import *
 from pathlib import Path
 
-
-# Tushare配置，请确保在环境变量中设置了TS_TOKEN（相关流程请自行ai，或在此处直接输入token）。
+# Tushare 配置：优先从仓库根目录 .env 读取 TS_TOKEN。
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+load_dotenv(PROJECT_ROOT / '.env')
 token = os.getenv('TS_TOKEN')
 
 def _get_pro_client():
     if not token:
-        raise RuntimeError('未找到TS_TOKEN环境变量，请先配置后再运行。')
+        raise RuntimeError('未找到 TS_TOKEN，请在项目根目录的 .env 文件中配置后再运行。')
     # 显式传入 token，避免 tushare 在导入阶段进行 token 连接
     return ts.pro_api(token)
 
@@ -105,7 +107,7 @@ def get_data_by_date(single_function, table_name):
 
     print(f"正在下载从{(dates_to_download)[0]}到{(dates_to_download)[-1]}的数据")
     
-    results = Parallel(n_jobs=-1)(
+    results = Parallel(n_jobs=DATA_FETCH_JOBS)(
         delayed(single_function)(date) for date in tqdm(dates_to_download, desc="下载进度"))
     
     # 筛选出非空的数据
@@ -268,7 +270,7 @@ def get_financial():
     ts_codes = stocks_df['ts_code'].tolist()
     print(f"开始下载 {len(ts_codes)} 只股票的财务数据...")
 
-    results = Parallel(n_jobs=-1)(
+    results = Parallel(n_jobs=DATA_FETCH_JOBS)(
         delayed(fetch_finan_by_single_stock)(code) for code in tqdm(ts_codes, desc="下载进度"))
 
     all_df = [df for df in results if df is not None and not df.empty]
@@ -310,5 +312,4 @@ def get_industry():
     # pro = _get_pro_client()
     # df = pro.index_member_all()
     # df.to_csv("test.csv")
-
 
