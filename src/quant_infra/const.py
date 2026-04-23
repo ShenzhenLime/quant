@@ -23,6 +23,13 @@ N_SIGMAS = 3
 # 达到api限制后，等待的时间（秒）
 LIMIT_SLEEP_SECONDS = 15
 
+# 数据抓取并行进程数
+DATA_FETCH_JOBS = 4
+
+# 特质波动率相关窗口配置
+RESID_REG_WINDOW = 252
+SPEC_VOL_WINDOW = 20
+
 # 数据库路径常量
 DB_PATH = './Data/data.db'
 

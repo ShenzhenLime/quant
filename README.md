@@ -82,7 +82,7 @@ src/quant_infra/
 
 ### `get_data.py` — 数据获取
 
-通过 **Tushare Pro** 接口下载数据并持久化到 DuckDB。Token 从环境变量 `TS_TOKEN` 读取，**不硬编码**于代码中。
+通过 **Tushare Pro** 接口下载数据并持久化到 DuckDB。Token 从项目根目录 `.env` 中的 `TS_TOKEN` 读取，**不硬编码**于代码中。
 
 #### 增量更新机制
 
@@ -102,7 +102,7 @@ src/quant_infra/
 | `get_ins(index_code)` | `Data/Metadata/{code}_ins.csv` | 获取指数最近一个月的成分股列表 |
 | `get_trade(start, end)` | `Data/Metadata/trade_day.csv` | 更新交易日历 |
 
-所有日频数据下载均通过 `joblib.Parallel` + `tqdm` 进行**多进程并行**，并内置限流重试（遇到 Tushare 频率限制时自动等待）。
+所有日频数据下载均通过 `joblib.Parallel` + `tqdm` 进行**4 进程并行**，并内置限流重试（遇到 Tushare 频率限制时自动等待）。
 
 ---
 
@@ -123,9 +123,9 @@ src/quant_infra/
 
 #### 2. 股票残差收益率（`calc_resid()`）
 
-对每只股票用全历史数据回归四因子模型（OLS），将 Beta 系数存入 `stock_betas` 表，再计算每日实际收益与模型预测值之差，得到残差收益率（`stock_resids` 表）。残差收益率可作为剥离系统性风险后的纯 Alpha 信号。
+对每只股票按交易日进行**滚动回归**：对每个交易日 `t`，使用最近 `RESID_REG_WINDOW` 个交易日的收益与四因子数据回归当期 Beta，并仅保留 `t` 当天的残差，结果写入 `stock_resids` 表。残差收益率可作为剥离系统性风险后的纯 Alpha 信号。
 
-整个流程支持**增量更新**：已有 Beta 无需重新回归，仅补齐缺失日期的残差。
+整个流程支持**增量更新**：补算新日期时会自动向前回看足够长的历史窗口，以保证滚动回归可用。
 
 #### 3. 去极值（`winsorize(series, n=3)`）
 
@@ -211,8 +211,7 @@ Tushare API
 │  ├── daily_basic        │  ← 每日指标
 │  ├── index_data         │  ← 指数行情
 │  ├── pricing_factors    │  ← MKT/SMB/HML/UMD
-│  ├── stock_betas        │  ← 四因子 Beta
-│  └── stock_resids       │  ← 残差收益率
+│  └── stock_resids       │  ← 滚动回归残差
 └─────────────────────────┘
     │
     ▼  factor_analyze.py
@@ -243,12 +242,9 @@ pandas / numpy / joblib / matplotlib / duckdb / tqdm / tushare / scipy
 pip install -e .
 ```
 
-配置 Tushare Token（需要2000积分及以上）：
+在项目根目录创建 `.env`，配置 Tushare Token（需要2000积分及以上）：
 
 ```bash
 TS_TOKEN=你的token
 ```
-
-
-
 
